@@ -1,0 +1,196 @@
+---
+title: 'NBA Player Projections vs. 2022 Performance: Project 1 Code'
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+# The following code is a basic setup for your document
+# You won't have to edit it (unless you want to!)
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F, R.options=list(max.print=100, dplyr.print_max=100))
+```
+
+## Title and Introduction
+
+I chose the key_crop_yields dataset that I found on github here: https://github.com/rfordatascience/tidytuesday/tree/master/data that has datasets for R specifically for data science. It has an Entity variable that contains country names, regions of the world or simply the whole world. It also has a Year variable that shows what year the crop yields are from. There are also many numeric variables such as Rice (in tonnes per hectare) for other crops such as wheat, potatoes, beans and more. The dataset shows the crop yields for each of these entities for each year. The years do not increase by 1 for each year. Instead, they skip around and the earliest it seems to go back to is 1960. The latest appears to be 2019.
+
+I think there could be a relationship between how much a crop is grown depending on what the entity is due to conditions such as climate conditions, varying consumer demand, political conditions and more.
+
+I will likely need to clean the data to only include world regions so they can be compared against each other. I will also pick certain crops and ensure that all the regions grow these crops so they can be fairly compared. I also plan to rename the crop yield variables to simply the name of the crop. I will also create another a variable called Africa that shows if the Entity is Africa using a 1 if it is and a 0 if it is not. This will be used for my response variable.
+
+I was interested in this dataset becuase I think that crop yields is something overlooked in society and I think its interesting to see where our food is coming from. The production is also subject to numerous factors, which I find very intriguing.
+
+
+```{r, echo=FALSE}
+# Call the tidyverse package
+library(tidyverse)
+library(mosaic)
+library(factoextra)
+library(cluster)
+library(readr)
+library(plotROC)
+
+key_crop_yields <- readr::read_csv(
+  'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-01/key_crop_yields.csv')
+```
+
+## Exploratory Data Analysis
+
+It appears that rice and potatoes are the most correlated with a value of .89. Meanwhile, wheat and potatoes are the least correlated with a value of .11. It appears that all the crops are positively correlated and in general wheat correlates the weakest with the other crops.
+
+```{r}
+new1 = key_crop_yields %>%
+
+  select(!c(Year, Code, "Bananas (tonnes per hectare)",
+            "Cocoa beans (tonnes per hectare)", "Barley (tonnes per hectare)", "Cassava (tonnes per hectare)")) %>%
+  filter(Entity == c("Africa", "Americas", "Asia", "Europe", "Australia & New Zealand")) %>%
+  rename(wheat = `Wheat (tonnes per hectare)`,
+         rice = `Rice (tonnes per hectare)`,
+         maize = `Maize (tonnes per hectare)`,
+         soybeans = `Soybeans (tonnes per hectare)`,
+         potatoes = `Potatoes (tonnes per hectare)`) %>%
+  select(Entity, wheat, rice, maize, soybeans, potatoes) %>%
+  na.omit() %>%
+  mutate(Africa = ifelse(Entity == "Africa", yes = 1, no = 0))
+
+new2 = new1 %>%
+  select(!Africa)
+
+crops_num <- new2 %>%
+  select_if(is.numeric)
+cor(crops_num, use = "pairwise.complete.obs")
+
+library(psych)
+pairs.panels(crops_num, 
+             method = "pearson", # correlation coefficient method
+             hist.col = "blue", # color of histogram 
+             smooth = FALSE, density = FALSE, ellipses = FALSE)
+
+
+
+
+
+```
+
+## Clustering
+
+The centers for the clusters from 1 to 5 (for each region) were the 26th, 29th, 20th, 54th, and 43rd case in the dataset. The second cluster had the most points while cluster 3 had the highest diameter and max distance. Cluster 1 has the lowest average distance meaning it is the most tightly packed. Cluster 5 did well finding only Australia and New Zealand points; however, some were put in the middle cluster that had many values from all the regions. Cluster 3 did very well capturing the points from the Americas. Cluster 4 was mostly European points, but some points from Asia were incorrectly grouped in also. Cluster 1 was primarily Africa, but some European and Asian points were captured also. The clustering likely did not take into count that yields might have rose in regions so that is resembled other regions. The second cluster grouped together points that were all very similar highlighting that there was similar data regardless of region for some entities.
+
+```{r}
+new2 = new1 %>%
+  select(!Africa)
+
+HW9_num = new2 %>%
+  select_if(is.numeric) %>%
+  scale %>%
+  as.data.frame
+
+pam_results <- HW9_num %>%
+  pam(k = 5) #used 5 becuase there are 5 regions
+
+pam_results$id.med
+pam_results$clusinfo
+
+HW9_num <- as.data.frame(HW9_num) %>%
+  mutate(cluster = as.factor(pam_results$clustering)) %>%
+  mutate(Entity = as.factor(new2$Entity))
+
+fviz_cluster(pam_results, data = HW9_num, 
+             shape = HW9_num$Entity) +
+  geom_point(aes(shape = HW9_num$Entity)) +
+  guides(shape = guide_legend(title = "Entity"))
+```
+
+### Dimensionality Reduction
+
+The first and second primary components explain about 88.7% variance. Looking at the first primary component maize, potatoes, and rice contribute more than 20% and soybeans is just below that threshold. This indicates that these variables correlate very closely with each other. The second primary component has wheat contributing more than 50% while the other crop yields are below 20% indicating that wheat has very little correlation with the other crop yields. This aligns with what was found in the correlation matrix from the Exploratory Data Analysis. The crops that correlate closely with each other are grouped together and wheat which has little correlation with other crops is put in a separate primary component.
+
+```{r}
+new2 = new1 %>%
+  select(!Africa)
+
+HW9_num = new2 %>%
+  select_if(is.numeric) %>%
+  scale %>%
+  as.data.frame
+#scales only numeric columns
+
+pca <- HW9_num %>%
+  prcomp() #performs the PCA
+
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 100)) 
+#visualizes the percentage variance for each PC
+
+fviz_pca_var(pca, col.var = "black", repel = TRUE)
+
+fviz_contrib(pca, choice = "var", axes = 1, top = 5) #uses the top 5 variables
+fviz_contrib(pca, choice = "var", axes = 2, top = 5)
+```
+
+### Classification and Cross-Validation
+
+The AUC calculated by the logistic regression to predict whether the entity is Africa based on the crop yields is equal to .9438. I was not able to perform the k-fold cross-validation because my dataset is too small, so Professor Guyot suggested that I use the Leave-One-Out cross-validation. Using this method, I found that the AUC was .9365. This indicates that the model was not overfit because using testing data did not lead to a significant drop-off. The logistic regression classifier does a great job of predicting new observations.
+
+```{r}
+ggplot(new1, aes(rice, Africa)) + 
+  geom_point() +
+  geom_smooth(method = "glm", se = FALSE, 
+              method.args = list(family = "binomial")) + 
+  ylim(0,1)
+
+fit <- glm(Africa ~ rice, data = new1, family = "binomial")
+summary(fit)
+
+
+# Calculate a predicted probability
+log_crops <- new1 %>% 
+  mutate(probability = predict(fit, type = "response"),
+         predicted = ifelse(probability > 0.5, 1, 0)) %>%
+  # Give a name to the rows
+  rownames_to_column("Entity1") %>% 
+  select(Entity1, rice, Africa, probability, predicted)
+head(log_crops)
+
+
+# Visualize predicted and actual transmissions
+ggplot(log_crops, aes(rice, Africa)) + 
+  geom_point(aes(color = as.factor(predicted))) +
+  geom_smooth(method = "glm", se = FALSE, 
+              method.args = list(family = "binomial")) +
+  ylim(0,1) + 
+  geom_hline(yintercept = 0.5, lty = 2)
+
+table(log_crops$Africa, log_crops$predicted) %>% addmargins
+ROC <- ggplot(log_crops) + 
+  geom_roc(aes(d = Africa, m = probability), n.cuts = 0)
+ROC
+
+calc_auc(ROC)
+
+tests <- data.frame()
+
+for(i in 1:nrow(new1)){
+  # Create training and test sets
+  train <- new1[-i, ] # all observations but i
+  test <- new1[i, ]   # observation i
+  
+  # Train model on training set (all but fold i)
+  fit <- glm(Africa ~ rice, data = train, family = "binomial")
+  
+  # Compare predicted probability to the truth
+  tests <- rbind(tests, c(predict(fit, newdata = test, type = "response"), 
+                          Africa = test$Africa))
+  names(tests) <- c("probability","Africa")
+}
+
+ROC <- ggplot(tests) + geom_roc(aes(d = Africa, m = probability), n.cuts = 0)
+
+# Get diagnostics for fold i (AUC)
+diags_LOOCV <- calc_auc(ROC)$AUC
+
+# Resulting diagnostics for average performance
+diags_LOOCV
+
+```
